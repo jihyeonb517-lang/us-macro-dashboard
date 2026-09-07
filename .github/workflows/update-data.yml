@@ -40,7 +40,8 @@ jobs:
       - name: Refresh observations
         id: refresh
         continue-on-error: true
-        run: python fetch_data.py
+        timeout-minutes: 4
+        run: python -u fetch_data.py
       - name: Validate deployable JSON
         run: python -m unittest discover -s tests -p test_artifact.py -v
       - name: Commit data and durable fallback cache

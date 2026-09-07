@@ -134,7 +134,12 @@ without downloading data. After the bot has updated the repository, run
   are conservative freshness heuristics, not release-calendar guarantees.
 - Weekends, holidays, and days between monthly releases do not automatically make
   a value stale. Explicit missing latest observations and failed downloads do.
-- Downloads retry three times. If every download fails, the script writes fallback
+- Eight isolated source workers run concurrently, each with a hard 40-second
+  deadline covering all retries. Progress appears as each source starts and ends.
+  Even if all 20 sources hang, downloads finish in approximately two minutes,
+  plus process startup and JSON calculation time. The Actions refresh step has
+  a separate four-minute emergency timeout.
+- Downloads retry up to three times within that deadline. If every download fails, the script writes fallback
   status and exits with code 2. The workflow still publishes valid preserved data,
   then reports a failed run so the outage is visible in Actions.
 - Files are replaced atomically and JSON rejects non-finite numbers. The workflow

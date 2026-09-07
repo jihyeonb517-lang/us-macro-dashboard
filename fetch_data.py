@@ -13,8 +13,10 @@ import json
 import logging
 import math
 import os
+import subprocess
+import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -132,6 +134,32 @@ def fetch_retry(sid):
             if attempt < 2:
                 time.sleep(2 ** attempt)
     return sid, None, error
+
+
+def fetch_bounded(sid, timeout=40):
+    """A separate process makes the entire provider download deadline enforceable."""
+    logging.info('%s: starting download (maximum %ss)', sid, timeout)
+    try:
+        result = subprocess.run(
+            [sys.executable, '-u', str(Path(__file__).resolve()), '--source', sid],
+            capture_output=True, text=True, encoding='utf-8', timeout=timeout,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        )
+        if result.returncode:
+            return sid, None, result.stderr[-1000:] or 'Source worker failed'
+        return tuple(json.loads(result.stdout))
+    except subprocess.TimeoutExpired:
+        return sid, None, f'Download exceeded {timeout}s deadline'
+    except (OSError, ValueError) as exc:
+        return sid, None, str(exc)
+
+
+def download_all():
+    # Process isolation also prevents Yahoo shared-state conflicts.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(fetch_bounded, sid) for sid in FREQUENCIES]
+        for future in as_completed(futures):
+            yield future.result()
 
 
 def calendar(points, weekly=False):
@@ -292,11 +320,7 @@ def refresh(output=ROOT/'data.json', cache=ROOT/'cache'/'observations.json', off
     raw = read_json(cache, {})
     successes = 0
     if not offline:
-        # FRED requests are independent; Yahoo runs sequentially to avoid shared-state issues.
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            results = list(pool.map(fetch_retry, [s for s in FREQUENCIES if s not in YAHOO]))
-        results.extend(fetch_retry(s) for s in sorted(YAHOO))
-        for sid, entry, error in results:
+        for sid, entry, error in download_all():
             if entry:
                 existing = raw.get(sid, {}).get('points', [])
                 # Preserve older history when providers limit their downloadable window.
@@ -330,10 +354,14 @@ def refresh(output=ROOT/'data.json', cache=ROOT/'cache'/'observations.json', off
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--offline', action='store_true')
+    parser.add_argument('--source', choices=list(FREQUENCIES), help=argparse.SUPPRESS)
     parser.add_argument('--output', type=Path, default=ROOT/'data.json')
     parser.add_argument('--cache', type=Path, default=ROOT/'cache'/'observations.json')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+    if args.source:
+        print(json.dumps(fetch_retry(args.source), ensure_ascii=True, allow_nan=False))
+        raise SystemExit(0)
     count = refresh(args.output, args.cache, args.offline)
     if not args.offline and count == 0:
         logging.error('All downloads failed. Last successful generatedAt retained; fallback status saved.')

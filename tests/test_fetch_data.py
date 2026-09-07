@@ -77,6 +77,13 @@ class FormulaTests(unittest.TestCase):
 
 
 class FallbackTests(unittest.TestCase):
+    def test_provider_timeout_returns_fallback(self):
+        with patch.object(f.subprocess, 'run', side_effect=f.subprocess.TimeoutExpired('worker', 40)):
+            sid, entry, error = f.fetch_bounded('UNRATE')
+        self.assertEqual(sid, 'UNRATE')
+        self.assertIsNone(entry)
+        self.assertIn('40s deadline', error)
+
     def test_last_value_retained_without_filling_points(self):
         data = raw(UNRATE=[['2026-07-01', 4.2], ['2026-08-01', None]])
         metric = f.build(data, {}, None, date(2026, 9, 7))['metrics'][1]
@@ -103,7 +110,7 @@ class FallbackTests(unittest.TestCase):
             timestamp = '2026-09-06T00:00:00+00:00'
             f.atomic_json(cache, data)
             f.atomic_json(output, f.build(data, {}, timestamp))
-            with patch.object(f, 'fetch_retry', side_effect=lambda sid: (sid, None, 'timeout')):
+            with patch.object(f, 'fetch_bounded', side_effect=lambda sid: (sid, None, 'timeout')):
                 self.assertEqual(f.refresh(output, cache), 0)
             result = json.loads(output.read_text(encoding='utf-8'))
             self.assertEqual(result['generatedAt'], timestamp)

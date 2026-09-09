@@ -115,8 +115,17 @@ def fetch_series(sid):
                        today=today_ny - timedelta(days=1))
     else:
         url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}'
-        with urlopen(Request(url, headers={'User-Agent': 'MacroDashboard/1.0'}), timeout=35) as response:
-            rows = list(csv.reader(io.StringIO(response.read().decode('utf-8-sig'))))
+        # Bound connection setup separately and avoid unusable IPv6 routes on
+        # hosted runners. curl also supplies a hard total request deadline.
+        response = subprocess.run(
+            ['curl', '--ipv4', '--fail', '--silent', '--show-error', '--location',
+             '--connect-timeout', '5', '--max-time', '12',
+             '--user-agent', 'Mozilla/5.0', url],
+            capture_output=True, timeout=15,
+        )
+        if response.returncode:
+            raise ValueError(response.stderr.decode('utf-8', errors='replace')[-500:])
+        rows = list(csv.reader(io.StringIO(response.stdout.decode('utf-8-sig'))))
         if not rows or len(rows[0]) != 2 or rows[0][1] != sid:
             raise ValueError('Unexpected FRED CSV header')
         points = clean(row for row in rows[1:] if len(row) == 2)
@@ -363,6 +372,7 @@ if __name__ == '__main__':
         print(json.dumps(fetch_retry(args.source), ensure_ascii=True, allow_nan=False))
         raise SystemExit(0)
     count = refresh(args.output, args.cache, args.offline)
-    if not args.offline and count == 0:
-        logging.error('All downloads failed. Last successful generatedAt retained; fallback status saved.')
+    if not args.offline and (count < len(FREQUENCIES) or any(
+            v.get('error') for v in read_json(args.cache, {}).values())):
+        logging.error('One or more sources failed. Fallback status saved; inspect per-source errors.')
         raise SystemExit(2)

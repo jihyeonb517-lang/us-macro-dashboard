@@ -2,7 +2,8 @@ name: Update data and deploy dashboard
 
 on:
   schedule:
-    - cron: '0 12 * * *'
+    # 08:17 and 20:17 Korea time, away from the busy top of the hour.
+    - cron: '17 23,11 * * *'
   workflow_dispatch:
   push:
     branches: [main]
@@ -65,7 +66,7 @@ jobs:
       - name: Deploy dashboard
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Report total fetch outage after publishing fallback
+      - name: Report any fetch outage after publishing fallback
         if: steps.refresh.outcome == 'failure'
         run: |
           echo '::error::Refresh failed. Preserved data was deployed; inspect source errors above.'

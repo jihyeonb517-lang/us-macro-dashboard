@@ -117,8 +117,15 @@ def fetch_series(sid):
         url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}'
         # Bound connection setup separately and avoid unusable IPv6 routes on
         # hosted runners. curl also supplies a hard total request deadline.
+        # HTTP/2 is forced down to HTTP/1.1 because hosted runners intermittently
+        # see "HTTP/2 stream ... INTERNAL_ERROR (err 2)" against fred.stlouisfed.org;
+        # HTTP/1.1 avoids that failure mode entirely.
         from curl_cffi import requests
-        response = requests.get(url, impersonate='chrome', timeout=12)
+        from curl_cffi.const import CurlHttpVersion
+        response = requests.get(
+            url, impersonate='chrome', timeout=12,
+            http_version=CurlHttpVersion.V1_1,
+        )
         response.raise_for_status()
         rows = list(csv.reader(io.StringIO(response.content.decode('utf-8-sig'))))
         if not rows or len(rows[0]) != 2 or rows[0][1] != sid:

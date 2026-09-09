@@ -117,15 +117,10 @@ def fetch_series(sid):
         url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}'
         # Bound connection setup separately and avoid unusable IPv6 routes on
         # hosted runners. curl also supplies a hard total request deadline.
-        response = subprocess.run(
-            ['curl', '--ipv4', '--fail', '--silent', '--show-error', '--location',
-             '--connect-timeout', '5', '--max-time', '12',
-             '--user-agent', 'Mozilla/5.0', url],
-            capture_output=True, timeout=15,
-        )
-        if response.returncode:
-            raise ValueError(response.stderr.decode('utf-8', errors='replace')[-500:])
-        rows = list(csv.reader(io.StringIO(response.stdout.decode('utf-8-sig'))))
+        from curl_cffi import requests
+        response = requests.get(url, impersonate='chrome', timeout=12)
+        response.raise_for_status()
+        rows = list(csv.reader(io.StringIO(response.content.decode('utf-8-sig'))))
         if not rows or len(rows[0]) != 2 or rows[0][1] != sid:
             raise ValueError('Unexpected FRED CSV header')
         points = clean(row for row in rows[1:] if len(row) == 2)
